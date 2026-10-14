@@ -13,8 +13,20 @@ name=${1:-}
 [ -n "$name" ] || read -rp "Profile name (e.g. home, work): " name
 [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "name: letters, digits, - and _ only" >&2; exit 1; }
 conf="profiles/$name.conf"
+# Say plainly how it ended: a half-finished run must not look like success.
+trap 'rc=$?; echo >&2; if [ $rc -eq 0 ]; then echo "==> DONE. Installers are in $RD_ROOT/dist/$name/" >&2;
+  else echo "*** NOT FINISHED - no new installer was made. Fix the problem above and run ./make.sh $name again. ***" >&2; fi' EXIT
 cur() { [ -f "$conf" ] && sed -n "s/^$1=//p" "$conf" | head -1 || true; }
-ask() { local v; read -rp "$1 [$2]: " v; printf '%s' "${v:-$2}"; }
+# ask <prompt> <default> [regex] [hint]: asks again until the answer matches, so a typo loses nothing.
+ask() {
+  local v
+  while :; do
+    read -rp "$1 [$2]: " v || exit 1; v=${v:-$2}
+    [[ -z "${3:-}" || "$v" =~ $3 ]] && break
+    echo "  $4, try again" >&2
+  done
+  printf '%s' "$v"
+}
 # secret_twice <prompt> [min length]: asks again until it gets two matching entries, so a typo loses nothing.
 secret_twice() {
   local a b
@@ -30,23 +42,25 @@ secret_twice() {
 
 id=$(cur ID_SERVER); relay=$(cur RELAY_SERVER); key=$(cur KEY)
 echo "Server: in RustDesk, Settings > Network > ID/Relay server > Export server config, then paste here."
-read -rp "Paste config (Enter = keep current${id:+: $id}${id:-: public servers}; '-' = public servers): " cfg
-if [ "$cfg" = - ]; then
-  id= relay= key=
-elif [ -n "$cfg" ]; then
+while :; do
+  read -rp "Paste config (Enter = keep current${id:+: $id}${id:-: public servers}; '-' = public servers): " cfg || exit 1
+  [ -z "$cfg" ] && break
+  [ "$cfg" != - ] || { id= relay= key=; break; }
   # RustDesk export = base64(JSON {host, relay, api, key}) written backwards.
-  out=$(python3 -c '
+  if out=$(python3 -c '
 import sys, json, base64, re
 s = sys.argv[1].strip()[::-1]; s += "=" * (-len(s) % 4)
 d = json.loads(base64.b64decode(s))
 host, relay, key = (str(d.get(k, "")) for k in ("host", "relay", "key"))
 # These land in the installers, so only plain host names / base64 are accepted.
 assert all(re.fullmatch(r"[A-Za-z0-9.:\[\]-]*", v) for v in (host, relay)) and re.fullmatch(r"[A-Za-z0-9+/=]*", key)
-print(host); print(relay); print(key)' "$cfg" 2>/dev/null) \
-    || { echo "that doesn't look like a RustDesk exported server config" >&2; exit 1; }
-  mapfile -t f <<<"$out"
-  id=${f[0]:-}; relay=${f[1]:-}; key=${f[2]:-}   # $(...) drops trailing empty lines
-fi
+print(host); print(relay); print(key)' "$cfg" 2>/dev/null); then
+    mapfile -t f <<<"$out"
+    id=${f[0]:-}; relay=${f[1]:-}; key=${f[2]:-}   # $(...) drops trailing empty lines
+    break
+  fi
+  echo "  that doesn't look like a RustDesk exported server config, try again" >&2
+done
 echo "  ID server: ${id:-public}  relay: ${relay:-auto}  key: ${key:-none}"
 
 # Suggest the newest stable RustDesk release (Enter takes it); fall back to the profile's version offline.
@@ -56,19 +70,21 @@ now=$(cur VERSION)
 if [ -n "$latest" ] && [ -n "$now" ] && [ "$latest" != "$now" ]; then
   echo "  This profile uses RustDesk $now; the newest is $latest."
 fi
-ver=$(ask "RustDesk version${latest:+ (Enter = newest)}" "${latest:-${now:-1.5.0}}")
-[[ "$ver" =~ ^[0-9.]+$ ]] || { echo "version: digits and dots only, e.g. 1.5.0" >&2; exit 1; }
-ts=$(ask "Tailscale (login/key/none)" "$(cur TAILSCALE | grep . || echo none)")
-case $ts in login|key|none) ;; *) echo "Tailscale must be login, key or none" >&2; exit 1;; esac
+ver=$(ask "RustDesk version${latest:+ (Enter = newest)}" "${latest:-${now:-1.5.0}}" '^[0-9.]+$' 'digits and dots only, e.g. 1.5.0')
+ts=$(ask "Tailscale (login/key/none)" "$(cur TAILSCALE | grep . || echo none)" '^(login|key|none)$' 'type login, key or none')
 brands=$(cd brand-src 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | tr '\n' / || true)
-brand=$(ask "Brand (${brands}none)" "$(cur BRAND | grep . || echo none)")
+brand=$(ask "Brand (${brands}none)" "$(cur BRAND | grep . || echo none)" "^(${brands//\//|}none)\$" "type one of: ${brands}none")
 [ "$brand" = none ] && brand=
 [ -z "$brand" ] || [ -f "brand-src/$brand/brand.conf" ] || { echo "no brand-src/$brand/brand.conf" >&2; exit 1; }
-helper=$(ask "Who people should contact (shown in the installer)" "$(cur HELPER | grep . || echo your support person)")
+# Same rule as build.sh: it lands inside quoted strings in the installers.
+helper=$(ask "Who people should contact (shown in the installer)" "$(cur HELPER | grep . || echo your support person)" '^[A-Za-z0-9 ._,-]+$' 'letters, digits, space . _ , - only')
 
-pw=$(secret_twice "RustDesk password")
-# Windows PowerShell mangles these in the argument it hands RustDesk, silently setting a different password.
-[[ "$pw" != *[\"\\]* ]] || { echo 'password: no " or \ please (Windows cannot pass them to RustDesk)' >&2; exit 1; }
+while :; do
+  pw=$(secret_twice "RustDesk password")
+  # Windows PowerShell mangles these in the argument it hands RustDesk, silently setting a different password.
+  [[ "$pw" != *[\"\\]* ]] && break
+  echo '  no " or \ please (Windows cannot pass them to RustDesk), try again' >&2
+done
 tskey=
 [ "$ts" != key ] || tskey=$(secret_twice "Tailscale auth key")
 RD_UNLOCK=$(secret_twice "Unlock passphrase (typed at each install; 16+ characters, e.g. 4 random words)" 16)
