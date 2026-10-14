@@ -26,7 +26,7 @@ if [ -n "$BRAND_NAME" ]; then
 fi
 echo "This sets up RustDesk so __HELPER__ can help you with this computer. It takes a few minutes."
 say "First, the unlock passphrase"
-# RD_UNLOCK in the environment skips the prompt (unattended/RMM use).
+# RD_UNLOCK in the environment skips the prompt (unattended/RMM use, run as root: sudo drops it).
 [ -n "${RD_UNLOCK:-}" ] || { read -rsp "Type the passphrase __HELPER__ gave you (nothing shows as you type), then press Enter: " RD_UNLOCK </dev/tty; echo; }
 export RD_UNLOCK
 unlock() {

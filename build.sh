@@ -72,7 +72,7 @@ for os in windows linux mac; do
 import re, sys
 text, helper, title = open(sys.argv[1]).read(), sys.argv[2], sys.argv[3]
 if helper != "your support person":
-    text = re.sub(r"[Yy]our(\s+)support(\s+)person", lambda m: helper, text)
+    text = re.sub(r"[Yy]our(\s+)support(\s+)person", lambda m: helper if m.group(0)[0] == "y" else helper[0].upper() + helper[1:], text)
 if title != "RustDesk":
     text = text.replace("remote help", title, 1)
 sys.stdout.write(text)

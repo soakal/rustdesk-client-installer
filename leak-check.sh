@@ -11,7 +11,8 @@ if grep -E '^brand-src/' <<<"$files" | grep -v '^brand-src/example/'; then echo 
 pat=${LEAK_PATTERNS:-.git/leak-patterns}
 if [ -s "$pat" ]; then
   if git grep -I -n -i -E -f "$pat" -- . ':!leak-check.sh'; then echo "^ private string found"; bad=1; fi
-  if git log --format='%an %ae %cn %ce %s%n%b' | grep -i -E -f "$pat"; then echo "^ private string in commit history"; bad=1; fi
+  if git log --format='%an %ae %cn %ce %s%n%b' | grep -i -E -f "$pat"; then echo "^ private string in commit messages"; bad=1; fi
+  if git log -p --all --format= 2>/dev/null | grep -a -v '^Binary files' | grep -i -E -f "$pat"; then echo "^ private string in an older version of a file"; bad=1; fi
 else
   echo "warning: no $pat, so only the file checks ran" >&2
 fi

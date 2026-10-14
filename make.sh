@@ -51,7 +51,7 @@ now=$(cur VERSION)
 if [ -n "$latest" ] && [ -n "$now" ] && [ "$latest" != "$now" ]; then
   echo "  This profile uses RustDesk $now; the newest is $latest."
 fi
-ver=$(ask "RustDesk version (Enter = newest)" "${latest:-${now:-1.5.0}}")
+ver=$(ask "RustDesk version${latest:+ (Enter = newest)}" "${latest:-${now:-1.5.0}}")
 [[ "$ver" =~ ^[0-9.]+$ ]] || { echo "version: digits and dots only, e.g. 1.5.0" >&2; exit 1; }
 ts=$(ask "Tailscale (login/key/none)" "$(cur TAILSCALE | grep . || echo none)")
 case $ts in login|key|none) ;; *) echo "Tailscale must be login, key or none" >&2; exit 1;; esac
