@@ -14,8 +14,10 @@ name=${1:-}
 [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "name: letters, digits, - and _ only" >&2; exit 1; }
 conf="profiles/$name.conf"
 # Say plainly how it ended: a half-finished run must not look like success.
-trap 'rc=$?; echo >&2; if [ $rc -eq 0 ]; then echo "==> DONE. Installers are in $RD_ROOT/dist/$name/" >&2;
-  else echo "*** NOT FINISHED - no new installer was made. Fix the problem above and run ./make.sh $name again. ***" >&2; fi' EXIT
+saved=
+trap 'rc=$?; echo >&2; if [ $rc -eq 0 ]; then echo "==> DONE. Installers are in $RD_ROOT/dist/$name/" >&2
+  elif [ -n "$saved" ]; then echo "*** NOT FINISHED - your answers are saved in $conf but the installers in dist/$name/ are not complete. Fix the problem above and run ./build.sh $name (no questions). ***" >&2
+  else echo "*** NOT FINISHED - nothing was saved or built. Fix the problem above and run ./make.sh $name again. ***" >&2; fi' EXIT
 cur() { [ -f "$conf" ] && sed -n "s/^$1=//p" "$conf" | head -1 || true; }
 # ask <prompt> <default> [regex] [hint]: asks again until the answer matches, so a typo loses nothing.
 ask() {
@@ -72,10 +74,13 @@ if [ -n "$latest" ] && [ -n "$now" ] && [ "$latest" != "$now" ]; then
 fi
 ver=$(ask "RustDesk version${latest:+ (Enter = newest)}" "${latest:-${now:-1.5.0}}" '^[0-9.]+$' 'digits and dots only, e.g. 1.5.0')
 ts=$(ask "Tailscale (login/key/none)" "$(cur TAILSCALE | grep . || echo none)" '^(login|key|none)$' 'type login, key or none')
-brands=$(cd brand-src 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | tr '\n' / || true)
-brand=$(ask "Brand (${brands}none)" "$(cur BRAND | grep . || echo none)" "^(${brands//\//|}none)\$" "type one of: ${brands}none")
-[ "$brand" = none ] && brand=
-[ -z "$brand" ] || [ -f "brand-src/$brand/brand.conf" ] || { echo "no brand-src/$brand/brand.conf" >&2; exit 1; }
+brands=$(cd brand-src 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | grep -E '^[A-Za-z0-9_-]+$' | tr '\n' / || true)
+while :; do
+  brand=$(ask "Brand (${brands}none)" "$(cur BRAND | grep . || echo none)")
+  [ "$brand" = none ] && { brand=; break; }
+  [[ "$brand" =~ ^[A-Za-z0-9_-]+$ ]] && [ -f "brand-src/$brand/brand.conf" ] && break
+  echo "  no brand-src/$brand/brand.conf; type one of: ${brands}none, try again" >&2
+done
 # Same rule as build.sh: it lands inside quoted strings in the installers.
 helper=$(ask "Who people should contact (shown in the installer)" "$(cur HELPER | grep . || echo your support person)" '^[A-Za-z0-9 ._,-]+$' 'letters, digits, space . _ , - only')
 
@@ -93,7 +98,10 @@ export RD_UNLOCK
 # "ok:" prefix lets the installer tell a wrong passphrase from a lucky-padding garbage decrypt.
 seal() { [ -z "$1" ] || printf 'ok:%s' "$1" | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -salt -a -A -pass env:RD_UNLOCK; }
 
-cat > "$conf" <<EOF
+# Encrypt first: a failure inside the heredoc below would not stop the script and would save empty secrets.
+pwenc=$(seal "$pw"); tsenc=$(seal "$tskey")
+[ -n "$pwenc" ] && { [ -z "$tskey" ] || [ -n "$tsenc" ]; } || { echo "encryption failed (is openssl installed?)" >&2; exit 1; }
+cat > "$conf.new" <<EOF
 # Made by make.sh $(date +%F). Rerun ./make.sh $name to change.
 # Blank ID_SERVER = RustDesk public servers. TAILSCALE: login | key | none
 ID_SERVER=$id
@@ -103,9 +111,10 @@ VERSION=$ver
 TAILSCALE=$ts
 HELPER=$helper
 BRAND=$brand
-PASSWORD_ENC=$(seal "$pw")
-TS_AUTHKEY_ENC=$(seal "$tskey")
+PASSWORD_ENC=$pwenc
+TS_AUTHKEY_ENC=$tsenc
 EOF
+mv "$conf.new" "$conf"; saved=1
 unset RD_UNLOCK
 echo "wrote $conf"
 "$tool/build.sh" "$name"
