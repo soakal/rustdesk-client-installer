@@ -44,7 +44,15 @@ print(host); print(relay); print(key)' "$cfg" 2>/dev/null) \
 fi
 echo "  ID server: ${id:-public}  relay: ${relay:-auto}  key: ${key:-none}"
 
-ver=$(ask "RustDesk version" "$(cur VERSION | grep . || echo 1.5.0)")
+# Suggest the newest stable RustDesk release (Enter takes it); fall back to the profile's version offline.
+latest=$(curl -fsSL --max-time 10 https://api.github.com/repos/rustdesk/rustdesk/releases/latest 2>/dev/null |
+  python3 -c 'import sys, json; t = json.load(sys.stdin)["tag_name"]; print(t if all(p.isdigit() for p in t.split(".")) else "")' 2>/dev/null || true)
+now=$(cur VERSION)
+if [ -n "$latest" ] && [ -n "$now" ] && [ "$latest" != "$now" ]; then
+  echo "  This profile uses RustDesk $now; the newest is $latest."
+fi
+ver=$(ask "RustDesk version (Enter = newest)" "${latest:-${now:-1.5.0}}")
+[[ "$ver" =~ ^[0-9.]+$ ]] || { echo "version: digits and dots only, e.g. 1.5.0" >&2; exit 1; }
 ts=$(ask "Tailscale (login/key/none)" "$(cur TAILSCALE | grep . || echo none)")
 case $ts in login|key|none) ;; *) echo "Tailscale must be login, key or none" >&2; exit 1;; esac
 brands=$(cd brand-src 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | tr '\n' / )

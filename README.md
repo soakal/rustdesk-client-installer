@@ -21,7 +21,7 @@ Needs bash, openssl, curl, python3 (+ Pillow for brands). Run in your own termin
 It asks for:
 1. The server config exported from RustDesk (Settings > Network > ID/Relay server > Export server config).
    Enter keeps the current one, `-` means RustDesk's public servers.
-2. RustDesk version and Tailscale mode (`login` / `key` / `none`).
+2. RustDesk version (it suggests the newest release; Enter takes it) and Tailscale mode (`login` / `key` / `none`).
 3. Brand (a folder in `brand-src/`, or `none`) and who people should contact, e.g. `the IT desk`.
 4. The RustDesk password, a Tailscale auth key (key mode only), and the unlock passphrase (16+ characters).
 
