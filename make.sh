@@ -62,6 +62,8 @@ brand=$(ask "Brand (${brands}none)" "$(cur BRAND | grep . || echo none)")
 helper=$(ask "Who people should contact (shown in the installer)" "$(cur HELPER | grep . || echo your support person)")
 
 pw=$(secret_twice "RustDesk password")
+# Windows PowerShell mangles these in the argument it hands RustDesk, silently setting a different password.
+[[ "$pw" != *[\"\\]* ]] || { echo 'password: no " or \ please (Windows cannot pass them to RustDesk)' >&2; exit 1; }
 tskey=
 [ "$ts" != key ] || tskey=$(secret_twice "Tailscale auth key")
 RD_UNLOCK=$(secret_twice "Unlock passphrase (typed at each install; 16+ characters, e.g. 4 random words)")

@@ -37,7 +37,10 @@ try {
   Say 'First, the unlock passphrase'
   # $env:RD_UNLOCK skips the prompt (unattended/RMM use).
   $pass = if ($env:RD_UNLOCK) { $env:RD_UNLOCK } else { [Net.NetworkCredential]::new('', (Read-Host 'Type the passphrase __HELPER__ gave you (you will see * as you type), then press Enter' -AsSecureString)).Password }
+  Remove-Item Env:RD_UNLOCK -ErrorAction SilentlyContinue   # keep it out of child processes (Tailscale, msiexec, RustDesk)
   $pw = Unlock $P.PASSWORD_ENC $pass
+  # Windows PowerShell mangles " and \ in native arguments, which would silently set a different password.
+  if ($pw -match '["\\]') { throw 'The RustDesk password contains " or \, which Windows cannot pass to RustDesk. Ask __HELPER__ for a new installer.' }
   $ver = $P.VERSION
 
   # --- Tailscale ---
@@ -67,6 +70,8 @@ try {
     }
   }
 
+  $pass = $null   # every secret is decrypted by now
+
   # --- RustDesk ---
   Say 'Downloading and installing RustDesk (about a minute). A RustDesk window may pop up - leave it alone.'
   $rdarch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' }
@@ -77,7 +82,7 @@ try {
   Start-Process "$tmp\rd.exe" -ArgumentList '--silent-install'
   $rd = "$env:ProgramFiles\RustDesk\rustdesk.exe"
   # Wait for this version, not just any rustdesk.exe: an upgrade starts with the old one already there.
-  $ok = { (Test-Path $rd) -and (Get-Item $rd).VersionInfo.ProductVersion -like "$ver*" }
+  $ok = { (Test-Path $rd) -and (Get-Item $rd).VersionInfo.ProductVersion -match "^$([regex]::Escape($ver))(\+|$)" }
   for ($i = 0; $i -lt 60 -and -not (& $ok); $i++) { Start-Sleep 2 }
   if (-not (& $ok)) { throw "RustDesk $ver install did not finish in 2 minutes" }
   if (-not (Get-Service RustDesk -ErrorAction SilentlyContinue)) { & $rd --install-service | Out-Null; Start-Sleep 5 }
@@ -95,8 +100,13 @@ try {
   # '""' because Windows PowerShell drops a plain '' argument.
   foreach ($o in @{ 'custom-rendezvous-server' = $P.ID_SERVER; 'relay-server' = $P.RELAY_SERVER; 'key' = $P.KEY }.GetEnumerator()) {
     $out = & $rd --option $o.Key $(if ($o.Value) { $o.Value } else { '""' }) | Out-String
-    if ($out.Trim()) { throw "RustDesk did not take setting $($o.Key): $out" }
+    if ($LASTEXITCODE -or $out.Trim()) { throw "RustDesk did not take setting $($o.Key): $out" }
+    # Read it back too: RustDesk can drop a write without saying so.
+    $got = (& $rd --option $o.Key | Out-String).Trim()
+    if ($LASTEXITCODE -or $got -cne "$($o.Value)") { throw "RustDesk did not keep setting $($o.Key)" }
   }
+  # Ask the service once more: if it stopped answering mid-way, the options above went to a local file instead.
+  if ((& $rd --password $pw | Out-String) -notmatch 'Done!') { throw 'RustDesk stopped answering while taking its settings.' }
   # The server can reject a reused ID (e.g. a reimaged PC) and RustDesk then picks a new one,
   # so give it time to register before reporting.
   Start-Sleep 20

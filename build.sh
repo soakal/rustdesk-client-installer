@@ -58,6 +58,11 @@ b = io.BytesIO(); Image.open(sys.argv[1]).convert('RGBA').resize((256, 256), Ima
 print('ICON_PNG_B64=' + base64.b64encode(b.getvalue()).decode())
 PY
 fi
+# Profile + brand text is pasted into the installers verbatim, so only KEY=value and # comment lines of
+# printable ASCII: anything else (a stray line, or a CR PowerShell reads as a line break) could close the
+# embedded block and run as code.
+! LC_ALL=C grep -v -E '^(#[ -~]*|[A-Z][A-Z0-9_]*=[ -~]*)?$' "$unix" "$win" >/dev/null ||
+  { echo "$conf / brand.conf: only KEY=value and # comment lines, plain ASCII, allowed" >&2; exit 1; }
 stamp() { sed -e "/^__PROFILE__\$/{r $1" -e 'd}' -e "s|__HELPER__|$helper|g" "$tool/templates/$2" > "dist/$3/$2"; }
 stamp "$unix" install-unix.sh "$1"
 stamp "$win" install-windows.ps1 "$1"

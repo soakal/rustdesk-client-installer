@@ -121,10 +121,15 @@ case $out in *Done!*) ;; *)
   [ "$OS" = Darwin ] || echo "RustDesk didn't take its settings. Run this from the desktop (not over SSH) while logged in." >&2
   exit 1;; esac
 # Blank = clear, so switching to a profile with public servers or no key drops the old values. Silent = success.
+# Read each one back too: RustDesk can drop a write without saying so.
 for opt in custom-rendezvous-server:ID_SERVER relay-server:RELAY_SERVER key:KEY; do
-  out=$("$rd" --option "${opt%%:*}" "$(get "${opt#*:}")" 2>/dev/null || true)   # stdout only: its messages are println, stderr may carry GTK/loader noise
-  [ -z "$out" ] || { echo "$out" >&2; exit 1; }
+  k=${opt%%:*}; v=$(get "${opt#*:}")
+  # stdout only: its messages are println, stderr may carry GTK/loader noise
+  out=$("$rd" --option "$k" "$v" 2>/dev/null) && [ -z "$out" ] && got=$("$rd" --option "$k" 2>/dev/null) && [ "$got" = "$v" ] ||
+    { echo "${out:-RustDesk did not keep setting $k}" >&2; exit 1; }
 done
+# Ask the service once more: if it stopped answering mid-way, the options above went to a local file instead.
+case $("$rd" --password "$PW" 2>&1 || true) in *Done!*) ;; *) echo "RustDesk stopped answering while taking its settings." >&2; exit 1;; esac
 # The server can reject a reused ID (e.g. a reimaged PC) and RustDesk then picks a new one.
 # Linux registers once someone is logged in to a desktop, so the ID may still change after that.
 sleep 20
