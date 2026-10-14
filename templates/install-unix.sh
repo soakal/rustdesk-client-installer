@@ -110,7 +110,16 @@ fi
 
 # Linux keeps RustDesk's settings per logged-in desktop user. With nobody logged in they are accepted
 # (Done!) but lost at the next login, so wait for the desktop user's RustDesk to be running.
-desktop_rd() { ps -C rustdesk -o user=,args= | awk '$1 != "root" && /--server/' | grep -q .; }
+# A login screen (gdm/sddm/lightdm) can run one too, so it must belong to a real desktop session's user.
+desktop_rd() {
+  local s
+  for s in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
+    [ "$(loginctl show-session "$s" -p Class --value 2>/dev/null)" = user ] || continue
+    case $(loginctl show-session "$s" -p Type --value 2>/dev/null) in x11|wayland) ;; *) continue;; esac
+    ps -C rustdesk -o uid=,args= | awk -v u="$(loginctl show-session "$s" -p User --value)" '$1 == u && /--server/' | grep -q . && return 0
+  done
+  return 1
+}
 if [ "$OS" = Linux ]; then
   for _ in $(seq 15); do desktop_rd && break; sleep 2; done
   desktop_rd || oops "Log in to this computer's desktop first (someone must be signed in on the screen), then run this again."
