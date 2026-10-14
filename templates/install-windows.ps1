@@ -58,15 +58,20 @@ try {
     }
     & $ts status *> $null
     if ($LASTEXITCODE -ne 0) {
+      # tailscale writes the login link and its errors to stderr. With 'Stop', Windows PowerShell turns the first
+      # stderr line into a fatal error whenever output is captured (RMM, a log file), so print it as plain text.
+      $ErrorActionPreference = 'Continue'
       if ($P.TAILSCALE -eq 'key') {
         [IO.File]::WriteAllText("$tmp\k", (Unlock $P.TS_AUTHKEY_ENC $pass))  # not Set-Content: module logging would record the key
-        & $ts up --unattended "--auth-key=file:$tmp\k"
+        & $ts up --unattended "--auth-key=file:$tmp\k" 2>&1 | ForEach-Object { Write-Host $(if ($_ -is [Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ }) }
       } else {
         Write-Host 'A web link will appear below. Send it to __HELPER__ (a photo of this window is fine) and wait here.'
         Write-Host 'This continues by itself once __HELPER__ opens the link.'
-        & $ts up --unattended
+        & $ts up --unattended 2>&1 | ForEach-Object { Write-Host $(if ($_ -is [Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ }) }
       }
-      if ($LASTEXITCODE -ne 0) { throw 'Tailscale could not connect (the error is just above).' }
+      $code = $LASTEXITCODE
+      $ErrorActionPreference = 'Stop'
+      if ($code -ne 0) { throw 'Tailscale could not connect (the error is just above).' }
     }
   }
 
