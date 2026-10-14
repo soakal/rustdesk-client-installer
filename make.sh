@@ -78,11 +78,12 @@ brands=$(cd brand-src 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | grep -E '^
 while :; do
   brand=$(ask "Brand (${brands}none)" "$(cur BRAND | grep . || echo none)")
   [ "$brand" = none ] && { brand=; break; }
-  [[ "$brand" =~ ^[a-z0-9-]+$ ]] && [ -f "brand-src/$brand/brand.conf" ] && break
-  echo "  \"$brand\" is not a brand here (brand-src/<a-z 0-9 -> with a brand.conf); type one of: ${brands}none, try again" >&2
+  # build.sh's own brand checks, so a brand it would refuse is caught here, before anything is saved.
+  "$tool/build.sh" --check-brand "$brand" && break
+  echo "  type one of: ${brands}none, or fix that brand first; try again" >&2
 done
 # Same rule as build.sh: it lands inside quoted strings in the installers.
-helper=$(ask "Who people should contact (shown in the installer)" "$(cur HELPER | grep . || echo your support person)" '^[A-Za-z0-9 ._,-]+$' 'letters, digits, space . _ , - only')
+helper=$(LC_ALL=C ask "Who people should contact (shown in the installer)" "$(cur HELPER | grep . || echo your support person)" '^[A-Za-z0-9 ._,-]+$' 'letters, digits, space . _ , - only')
 
 while :; do
   pw=$(secret_twice "RustDesk password")

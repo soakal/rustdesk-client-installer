@@ -9,14 +9,28 @@ set -euo pipefail
 tool=$(cd "$(dirname "$0")" && pwd)
 export RD_ROOT=${RD_ROOT:-$tool}
 cd "$RD_ROOT"
+val() { sed -n "s/^$1=//p" "$2" | head -1; }
+# Text that lands inside bash "...", PowerShell '...', sed and the cmd title: plain characters only.
+plain() { LC_ALL=C; [[ -z "$2" || "$2" =~ ^[A-Za-z0-9\ ._,-]+$ ]] || { echo "$1: letters, digits, space . _ , - only" >&2; exit 1; }; }
+# check_brand <name>: everything about brand-src/<name>, so make.sh can ask again before saving anything.
+check_brand() {
+  [[ "$1" =~ ^[a-z0-9-]+$ ]] || { echo "BRAND: a-z 0-9 - only" >&2; exit 1; }
+  local b="brand-src/$1"
+  [ -f "$b/brand.conf" ] && [ -f "$b/icon.png" ] || { echo "no $b/brand.conf + icon.png" >&2; exit 1; }
+  for k in BRAND_NAME TAGLINE; do plain "$k" "$(val $k "$b/brand.conf")"; done
+  [[ "$(val CONSOLE_COLOR "$b/brand.conf")" =~ ^[A-Za-z]*$ && "$(val ANSI_COLOR "$b/brand.conf")" =~ ^[0-9\;]*$ ]] ||
+    { echo "$b/brand.conf: CONSOLE_COLOR letters only, ANSI_COLOR digits and ; only" >&2; exit 1; }
+  ! LC_ALL=C grep -v -E '^(#[ -~]*|[A-Z][A-Z0-9_]*=[ -~]*)?$' "$b/brand.conf" >/dev/null ||
+    { echo "$b/brand.conf: only KEY=value and # comment lines, plain ASCII, allowed" >&2; exit 1; }
+  python3 -c 'import sys; from PIL import Image; Image.open(sys.argv[1]).load()' "$b/icon.png" 2>/dev/null ||
+    { echo "$b/icon.png: not a readable image (or python3 + Pillow missing)" >&2; exit 1; }
+}
+[ "${1:-}" != --check-brand ] || { check_brand "${2:-}"; exit 0; }
 [[ "${1:-}" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "usage: build.sh <profile>  (letters, digits, - and _)" >&2; exit 1; }
 conf="profiles/$1.conf"
 [ -f "$conf" ] || { echo "no $conf" >&2; exit 1; }
 grep -q '^PASSWORD_ENC=.' "$conf" || { echo "PASSWORD_ENC empty: run ./make.sh $1 first" >&2; exit 1; }
 mkdir -p "dist/$1"
-val() { sed -n "s/^$1=//p" "$2" | head -1; }
-# Text that lands inside bash "...", PowerShell '...', sed and the cmd title: plain characters only.
-plain() { LC_ALL=C; [[ -z "$2" || "$2" =~ ^[A-Za-z0-9\ ._,-]+$ ]] || { echo "$1: letters, digits, space . _ , - only" >&2; exit 1; }; }
 # HELPER= in the profile is who the installer tells people to contact (no names by default).
 helper=$(val HELPER "$conf"); helper=${helper:-your support person}; plain HELPER "$helper"
 ver=$(val VERSION "$conf"); [[ "$ver" =~ ^[0-9.]+$ ]] || { echo "VERSION: digits and dots only" >&2; exit 1; }
@@ -39,12 +53,8 @@ grep -q '^SHA_EXE_X64=' "$win.sha" || { echo "no published checksums for RustDes
 brand=$(val BRAND "$conf")
 if [ -n "$brand" ]; then
   # BRAND=<name> pulls in brand-src/<name>/brand.conf and its icon.png (shortcut/app-menu icon).
-  [[ "$brand" =~ ^[a-z0-9-]+$ ]] || { echo "BRAND: a-z 0-9 - only" >&2; exit 1; }
+  check_brand "$brand"
   bdir="brand-src/$brand"
-  [ -f "$bdir/brand.conf" ] && [ -f "$bdir/icon.png" ] || { echo "no $bdir/brand.conf + icon.png" >&2; exit 1; }
-  for k in BRAND_NAME TAGLINE; do plain "$k" "$(val $k "$bdir/brand.conf")"; done
-  [[ "$(val CONSOLE_COLOR "$bdir/brand.conf")" =~ ^[A-Za-z]*$ && "$(val ANSI_COLOR "$bdir/brand.conf")" =~ ^[0-9\;]*$ ]] ||
-    { echo "$bdir/brand.conf: CONSOLE_COLOR letters only, ANSI_COLOR digits and ; only" >&2; exit 1; }
   title=$(val BRAND_NAME "$bdir/brand.conf")
   grep -v '^#' "$bdir/brand.conf" | tee -a "$unix" >> "$win"
   python3 - "$bdir/icon.png" >> "$win" 2>/dev/null <<'PY' || { echo "icon: python3 + Pillow needed" >&2; exit 1; }
