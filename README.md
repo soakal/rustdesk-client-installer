@@ -85,9 +85,12 @@ two-line `make.sh`/`build.sh` wrappers that set `RD_ROOT`.
 
 ## Known limits
 
-- macOS: untested. Install and open the Tailscale app first (its VPN prompt needs a person); after install
-  open RustDesk once, click *Install service*, allow Screen Recording + Accessibility.
-- Linux registers with the server once someone is logged in to a desktop.
+- macOS: untested. Install and open the Tailscale app first (its VPN prompt needs a person); the installer
+  opens RustDesk and waits for *Install service* to be clicked; then allow Screen Recording + Accessibility.
+- The RustDesk password is briefly visible to other processes on the machine while it is being set
+  (RustDesk only takes it as a command-line argument).
+- Linux: x86_64 only. Run the installer from the desktop while logged in (not over SSH): RustDesk applies
+  its settings through the desktop session.
 
 ## License
 

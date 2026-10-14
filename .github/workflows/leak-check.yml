@@ -14,4 +14,4 @@ jobs:
           printenv PATTERNS | grep . > "$f" || true
           LEAK_PATTERNS="$f" ./leak-check.sh
       - name: Syntax
-        run: bash -n make.sh build.sh templates/install-unix.sh leak-check.sh
+        run: for f in make.sh build.sh guides.sh leak-check.sh templates/install-unix.sh; do bash -n "$f"; done

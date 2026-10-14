@@ -50,7 +50,8 @@ try {
       # "latest" has no fixed hash, so check it is really signed by Tailscale before running it as admin.
       $sig = Get-AuthenticodeSignature "$tmp\ts.msi"
       if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '(^|, )O="?Tailscale Inc\.?"?(,|$)') { throw 'The Tailscale download did not pass its safety check. Try again later.' }
-      Start-Process msiexec -ArgumentList "/i `"$tmp\ts.msi`" /qn TS_NOLAUNCH=true" -Wait
+      $m = Start-Process msiexec -ArgumentList "/i `"$tmp\ts.msi`" /qn TS_NOLAUNCH=true" -Wait -PassThru
+      if ($m.ExitCode -notin 0, 3010) { throw "Tailscale did not install (error $($m.ExitCode))." }
     }
     & $ts status *> $null
     if ($LASTEXITCODE -ne 0) {
@@ -75,15 +76,27 @@ try {
   # No -Wait: the installer leaves RustDesk running, so -Wait would never return.
   Start-Process "$tmp\rd.exe" -ArgumentList '--silent-install'
   $rd = "$env:ProgramFiles\RustDesk\rustdesk.exe"
-  for ($i = 0; $i -lt 60 -and -not (Test-Path $rd); $i++) { Start-Sleep 2 }
-  if (-not (Test-Path $rd)) { throw 'RustDesk install did not finish in 2 minutes' }
-  Start-Sleep 10
+  # Wait for this version, not just any rustdesk.exe: an upgrade starts with the old one already there.
+  $ok = { (Test-Path $rd) -and (Get-Item $rd).VersionInfo.ProductVersion -like "$ver*" }
+  for ($i = 0; $i -lt 60 -and -not (& $ok); $i++) { Start-Sleep 2 }
+  if (-not (& $ok)) { throw "RustDesk $ver install did not finish in 2 minutes" }
   if (-not (Get-Service RustDesk -ErrorAction SilentlyContinue)) { & $rd --install-service | Out-Null; Start-Sleep 5 }
-  Start-Service RustDesk -ErrorAction SilentlyContinue
   Say 'Applying settings'
-  @{ 'custom-rendezvous-server' = $P.ID_SERVER; 'relay-server' = $P.RELAY_SERVER; 'key' = $P.KEY }.GetEnumerator() |
-    Where-Object Value | ForEach-Object { & $rd --option $_.Key $_.Value | Out-Null }
-  & $rd --password $pw | Out-Null
+  # RustDesk exits 0 even when a setting fails. Only "Done!" proves the password reached the running service,
+  # so retry while it starts, and do it first so the options below also go to the service, not a stray file.
+  for ($i = 0; $i -lt 15; $i++) {
+    try { Start-Service RustDesk } catch {}   # the installer may still be registering it; retried here
+    $out = & $rd --password $pw | Out-String
+    if ($out -match 'Done!') { break }
+    Start-Sleep 2
+  }
+  if ($out -notmatch 'Done!') { throw "RustDesk did not take its settings: $out" }
+  # Blank = clear, so switching to a profile with public servers or no key drops the old values. Silent = success.
+  # '""' because Windows PowerShell drops a plain '' argument.
+  foreach ($o in @{ 'custom-rendezvous-server' = $P.ID_SERVER; 'relay-server' = $P.RELAY_SERVER; 'key' = $P.KEY }.GetEnumerator()) {
+    $out = & $rd --option $o.Key $(if ($o.Value) { $o.Value } else { '""' }) | Out-String
+    if ($out.Trim()) { throw "RustDesk did not take setting $($o.Key): $out" }
+  }
   # The server can reject a reused ID (e.g. a reimaged PC) and RustDesk then picks a new one,
   # so give it time to register before reporting.
   Start-Sleep 20

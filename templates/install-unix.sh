@@ -40,6 +40,8 @@ TSKEY=; [ "$TS_MODE" != key ] || TSKEY=$(unlock "$(get TS_AUTHKEY_ENC)") || oops
 unset RD_UNLOCK   # decrypted everything we need; don't hand the passphrase to apt, curl|sh, etc.
 VER=$(get VERSION)
 OS=$(uname -s)
+# Only x86_64 packages are stamped in; refuse before changing anything.
+[ "$OS" = Darwin ] || [ "$(uname -m)" = x86_64 ] || oops "This installer only supports Intel/AMD Linux computers. Tell __HELPER__."
 
 # --- Tailscale ---
 if [ "$TS_MODE" != none ]; then
@@ -96,14 +98,33 @@ elif command -v dnf >/dev/null; then
 else
   echo "unsupported OS" >&2; exit 1
 fi
-[ "$OS" = Darwin ] || { quiet systemctl enable --now rustdesk; sleep 3; }
+[ "$OS" = Darwin ] || quiet systemctl enable --now rustdesk
+# Mac: --install-service does nothing there; only the button in the app installs the service settings need.
+svc=/Library/LaunchDaemons/com.carriez.RustDesk_service.plist
+if [ "$OS" = Darwin ] && [ ! -f "$svc" ]; then
+  say "One click needed: RustDesk is opening. Click 'Install service' in its window (type your computer password if asked)."
+  sudo -u "${SUDO_USER:-root}" open -a /Applications/RustDesk.app || true
+  for _ in $(seq 150); do [ -f "$svc" ] && break; sleep 2; done
+  [ -f "$svc" ] || oops "'Install service' wasn't clicked in RustDesk. Run this again."
+fi
 
 say "Applying settings"
-for opt in custom-rendezvous-server:ID_SERVER relay-server:RELAY_SERVER key:KEY; do
-  v=$(get "${opt#*:}")
-  [ -z "$v" ] || quiet "$rd" --option "${opt%%:*}" "$v"
+# RustDesk exits 0 even when a setting fails. Only "Done!" proves the password reached the running service,
+# so retry while it starts, and do it first so the options below also go to the service, not a stray file.
+for _ in $(seq 15); do
+  out=$("$rd" --password "$PW" 2>&1 || true)
+  case $out in *Done!*) break;; esac
+  sleep 2
 done
-quiet "$rd" --password "$PW"
+case $out in *Done!*) ;; *)
+  echo "$out" >&2
+  [ "$OS" = Darwin ] || echo "RustDesk didn't take its settings. Run this from the desktop (not over SSH) while logged in." >&2
+  exit 1;; esac
+# Blank = clear, so switching to a profile with public servers or no key drops the old values. Silent = success.
+for opt in custom-rendezvous-server:ID_SERVER relay-server:RELAY_SERVER key:KEY; do
+  out=$("$rd" --option "${opt%%:*}" "$(get "${opt#*:}")" 2>/dev/null || true)   # stdout only: its messages are println, stderr may carry GTK/loader noise
+  [ -z "$out" ] || { echo "$out" >&2; exit 1; }
+done
 # The server can reject a reused ID (e.g. a reimaged PC) and RustDesk then picks a new one.
 # Linux registers once someone is logged in to a desktop, so the ID may still change after that.
 sleep 20
@@ -119,5 +140,5 @@ fi
 echo
 printf '\033[32m%s\n  ALL DONE. Tell __HELPER__ this number:  %s\n%s\033[0m\n' "==================================================================" \
   "${ID:-(open RustDesk and read the number under 'Your ID')}" "=================================================================="
-[ "$OS" != Darwin ] || echo "One more thing on a Mac: open RustDesk (in Applications), click 'Install service', and click Allow/Open System Settings on the Screen Recording and Accessibility pop-ups."
+[ "$OS" != Darwin ] || echo "One more thing on a Mac: in RustDesk, click Allow/Open System Settings on the Screen Recording and Accessibility pop-ups."
 echo "You can close this window now."

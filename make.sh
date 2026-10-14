@@ -40,7 +40,7 @@ assert all(re.fullmatch(r"[A-Za-z0-9.:\[\]-]*", v) for v in (host, relay)) and r
 print(host); print(relay); print(key)' "$cfg" 2>/dev/null) \
     || { echo "that doesn't look like a RustDesk exported server config" >&2; exit 1; }
   mapfile -t f <<<"$out"
-  id=${f[0]}; relay=${f[1]}; key=${f[2]}
+  id=${f[0]:-}; relay=${f[1]:-}; key=${f[2]:-}   # $(...) drops trailing empty lines
 fi
 echo "  ID server: ${id:-public}  relay: ${relay:-auto}  key: ${key:-none}"
 
@@ -55,7 +55,7 @@ ver=$(ask "RustDesk version${latest:+ (Enter = newest)}" "${latest:-${now:-1.5.0
 [[ "$ver" =~ ^[0-9.]+$ ]] || { echo "version: digits and dots only, e.g. 1.5.0" >&2; exit 1; }
 ts=$(ask "Tailscale (login/key/none)" "$(cur TAILSCALE | grep . || echo none)")
 case $ts in login|key|none) ;; *) echo "Tailscale must be login, key or none" >&2; exit 1;; esac
-brands=$(cd brand-src 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | tr '\n' / )
+brands=$(cd brand-src 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | tr '\n' / || true)
 brand=$(ask "Brand (${brands}none)" "$(cur BRAND | grep . || echo none)")
 [ "$brand" = none ] && brand=
 [ -z "$brand" ] || [ -f "brand-src/$brand/brand.conf" ] || { echo "no brand-src/$brand/brand.conf" >&2; exit 1; }
