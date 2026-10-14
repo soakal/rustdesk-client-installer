@@ -15,11 +15,16 @@ name=${1:-}
 conf="profiles/$name.conf"
 cur() { [ -f "$conf" ] && sed -n "s/^$1=//p" "$conf" | head -1 || true; }
 ask() { local v; read -rp "$1 [$2]: " v; printf '%s' "${v:-$2}"; }
+# secret_twice <prompt> [min length]: asks again until it gets two matching entries, so a typo loses nothing.
 secret_twice() {
   local a b
-  read -rsp "$1: " a; echo >&2
-  read -rsp "$1 again: " b; echo >&2
-  [ -n "$a" ] && [ "$a" = "$b" ] || { echo "empty or didn't match" >&2; exit 1; }
+  while :; do
+    read -rsp "$1: " a || exit 1; echo >&2
+    [ ${#a} -ge "${2:-1}" ] || { echo "  too short (${2:-1}+ characters), try again" >&2; continue; }
+    read -rsp "$1 again: " b || exit 1; echo >&2
+    [ "$a" = "$b" ] && break
+    echo "  didn't match, try again" >&2
+  done
   printf '%s' "$a"
 }
 
@@ -66,9 +71,8 @@ pw=$(secret_twice "RustDesk password")
 [[ "$pw" != *[\"\\]* ]] || { echo 'password: no " or \ please (Windows cannot pass them to RustDesk)' >&2; exit 1; }
 tskey=
 [ "$ts" != key ] || tskey=$(secret_twice "Tailscale auth key")
-RD_UNLOCK=$(secret_twice "Unlock passphrase (typed at each install; 16+ characters, e.g. 4 random words)")
+RD_UNLOCK=$(secret_twice "Unlock passphrase (typed at each install; 16+ characters, e.g. 4 random words)" 16)
 # The file may float around for years and can be attacked offline, so no short passphrases.
-[ ${#RD_UNLOCK} -ge 16 ] || { echo "passphrase: 16+ characters please (e.g. 4 random words)" >&2; exit 1; }
 export RD_UNLOCK
 # "ok:" prefix lets the installer tell a wrong passphrase from a lucky-padding garbage decrypt.
 seal() { [ -z "$1" ] || printf 'ok:%s' "$1" | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -salt -a -A -pass env:RD_UNLOCK; }
