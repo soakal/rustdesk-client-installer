@@ -74,12 +74,12 @@ if [ -n "$latest" ] && [ -n "$now" ] && [ "$latest" != "$now" ]; then
 fi
 ver=$(ask "RustDesk version${latest:+ (Enter = newest)}" "${latest:-${now:-1.5.0}}" '^[0-9.]+$' 'digits and dots only, e.g. 1.5.0')
 ts=$(ask "Tailscale (login/key/none)" "$(cur TAILSCALE | grep . || echo none)" '^(login|key|none)$' 'type login, key or none')
-brands=$(cd brand-src 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | grep -E '^[A-Za-z0-9_-]+$' | tr '\n' / || true)
+brands=$(cd brand-src 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | grep -E '^[a-z0-9-]+$' | tr '\n' / || true)
 while :; do
   brand=$(ask "Brand (${brands}none)" "$(cur BRAND | grep . || echo none)")
   [ "$brand" = none ] && { brand=; break; }
-  [[ "$brand" =~ ^[A-Za-z0-9_-]+$ ]] && [ -f "brand-src/$brand/brand.conf" ] && break
-  echo "  no brand-src/$brand/brand.conf; type one of: ${brands}none, try again" >&2
+  [[ "$brand" =~ ^[a-z0-9-]+$ ]] && [ -f "brand-src/$brand/brand.conf" ] && break
+  echo "  \"$brand\" is not a brand here (brand-src/<a-z 0-9 -> with a brand.conf); type one of: ${brands}none, try again" >&2
 done
 # Same rule as build.sh: it lands inside quoted strings in the installers.
 helper=$(ask "Who people should contact (shown in the installer)" "$(cur HELPER | grep . || echo your support person)" '^[A-Za-z0-9 ._,-]+$' 'letters, digits, space . _ , - only')
