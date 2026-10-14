@@ -95,7 +95,8 @@ try {
   # RustDesk exits 0 even when a setting fails. Only "Done!" proves the password reached the running service,
   # so retry while it starts, and do it first so the options below also go to the service, not a stray file.
   for ($i = 0; $i -lt 15; $i++) {
-    try { Start-Service RustDesk } catch {}   # the installer may still be registering it; retried here
+    # .Start() returns at once; Start-Service can wait forever on a service stuck starting. The loop bounds it.
+    try { (Get-Service RustDesk).Start() } catch {}   # the installer may still be registering it; retried here
     $out = & $rd --password $pw | Out-String
     if ($out -match 'Done!') { break }
     Start-Sleep 2
