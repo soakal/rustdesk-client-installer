@@ -1,0 +1,17 @@
+name: leak-check
+on: [push, pull_request]
+jobs:
+  leak-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Check for private files and strings
+        env:
+          PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+        run: |
+          f="$RUNNER_TEMP/leak-patterns"
+          printenv PATTERNS | grep . > "$f" || true
+          LEAK_PATTERNS="$f" ./leak-check.sh
+      - name: Syntax
+        run: bash -n make.sh build.sh templates/install-unix.sh leak-check.sh

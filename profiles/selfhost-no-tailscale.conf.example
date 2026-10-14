@@ -1,0 +1,11 @@
+# Self-hosted server reached directly (LAN IP, or public domain/IP), no Tailscale.
+# Off-LAN clients need TCP 21115-21117 + UDP 21116 forwarded to the server (21118-21119 only for web client).
+ID_SERVER=rustdesk.example.com
+RELAY_SERVER=rustdesk.example.com:21117
+KEY=<server id_ed25519.pub contents>
+VERSION=1.5.0
+TAILSCALE=none
+HELPER=your support person
+BRAND=
+PASSWORD_ENC=
+TS_AUTHKEY_ENC=

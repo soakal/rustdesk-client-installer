@@ -1,0 +1,11 @@
+# Self-hosted server reached over Tailscale (the server's MagicDNS name or 100.x address).
+# Use TAILSCALE=key with a pre-approved, reusable auth key for anyone but yourself.
+ID_SERVER=rustdesk.your-tailnet.ts.net
+RELAY_SERVER=rustdesk.your-tailnet.ts.net:21117
+KEY=<server id_ed25519.pub contents>
+VERSION=1.5.0
+TAILSCALE=key
+HELPER=your support person
+BRAND=
+PASSWORD_ENC=
+TS_AUTHKEY_ENC=

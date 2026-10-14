@@ -1,0 +1,11 @@
+# No self-hosted server, no Tailscale: RustDesk's public servers.
+# Easiest: ./make.sh <name> (answer - for the server). 
+ID_SERVER=
+RELAY_SERVER=
+KEY=
+VERSION=1.5.0
+TAILSCALE=none
+HELPER=your support person
+BRAND=
+PASSWORD_ENC=
+TS_AUTHKEY_ENC=

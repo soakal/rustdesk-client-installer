@@ -1,0 +1,5 @@
+dist/
+# Real profiles and brands hold your server details and encrypted passwords: keep them in a private repo.
+profiles/*.conf
+brand-src/*
+!brand-src/example/
