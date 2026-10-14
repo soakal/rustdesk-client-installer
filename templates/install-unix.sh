@@ -108,6 +108,14 @@ if [ "$OS" = Darwin ] && [ ! -f "$svc" ]; then
   [ -f "$svc" ] || oops "'Install service' wasn't clicked in RustDesk. Run this again."
 fi
 
+# Linux keeps RustDesk's settings per logged-in desktop user. With nobody logged in they are accepted
+# (Done!) but lost at the next login, so wait for the desktop user's RustDesk to be running.
+desktop_rd() { ps -C rustdesk -o user=,args= | awk '$1 != "root" && /--server/' | grep -q .; }
+if [ "$OS" = Linux ]; then
+  for _ in $(seq 15); do desktop_rd && break; sleep 2; done
+  desktop_rd || oops "Log in to this computer's desktop first (someone must be signed in on the screen), then run this again."
+fi
+
 say "Applying settings"
 # RustDesk exits 0 even when a setting fails. Only "Done!" proves the password reached the running service,
 # so retry while it starts, and do it first so the options below also go to the service, not a stray file.
