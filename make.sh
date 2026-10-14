@@ -3,6 +3,7 @@
 # Tailscale mode, the RustDesk password and an unlock passphrase; writes profiles/<name>.conf
 # (secrets encrypted) and builds dist/<name>/ installers. Run it yourself: it prompts for secrets.
 set -euo pipefail
+export LC_ALL=C   # every character check below means plain ASCII, whatever the user's locale
 # The tool (templates, guides) lives next to this script; profiles/, brand-src/ and dist/ live in RD_ROOT
 # (a private repo that keeps the tool in tool/), or next to the script when RD_ROOT is unset.
 tool=$(cd "$(dirname "$0")" && pwd)
@@ -83,7 +84,7 @@ while :; do
   echo "  type one of: ${brands}none, or fix that brand first; try again" >&2
 done
 # Same rule as build.sh: it lands inside quoted strings in the installers.
-helper=$(LC_ALL=C ask "Who people should contact (shown in the installer)" "$(cur HELPER | grep . || echo your support person)" '^[A-Za-z0-9 ._,-]+$' 'letters, digits, space . _ , - only')
+helper=$(ask "Who people should contact (shown in the installer)" "$(cur HELPER | grep . || echo your support person)" '^[A-Za-z0-9 ._,-]+$' 'letters, digits, space . _ , - only')
 
 while :; do
   pw=$(secret_twice "RustDesk password")

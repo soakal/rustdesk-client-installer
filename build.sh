@@ -4,6 +4,7 @@
 #   install-windows.ps1        admins/RMM:     powershell -ExecutionPolicy Bypass -File install-windows.ps1
 #   Install-RustDesk-Windows.cmd  the one to hand to people: double-click (= launcher.cmd + the .ps1)
 set -euo pipefail
+export LC_ALL=C   # every character check below means plain ASCII, whatever the user's locale
 # The tool (templates, guides) lives next to this script; profiles/, brand-src/ and dist/ live in RD_ROOT
 # (a private repo that keeps the tool in tool/), or next to the script when RD_ROOT is unset.
 tool=$(cd "$(dirname "$0")" && pwd)
@@ -11,7 +12,7 @@ export RD_ROOT=${RD_ROOT:-$tool}
 cd "$RD_ROOT"
 val() { sed -n "s/^$1=//p" "$2" | head -1; }
 # Text that lands inside bash "...", PowerShell '...', sed and the cmd title: plain characters only.
-plain() { LC_ALL=C; [[ -z "$2" || "$2" =~ ^[A-Za-z0-9\ ._,-]+$ ]] || { echo "$1: letters, digits, space . _ , - only" >&2; exit 1; }; }
+plain() { [[ -z "$2" || "$2" =~ ^[A-Za-z0-9\ ._,-]+$ ]] || { echo "$1: letters, digits, space . _ , - only" >&2; exit 1; }; }
 # check_brand <name>: everything about brand-src/<name>, so make.sh can ask again before saving anything.
 check_brand() {
   [[ "$1" =~ ^[a-z0-9-]+$ ]] || { echo "BRAND: a-z 0-9 - only" >&2; exit 1; }
