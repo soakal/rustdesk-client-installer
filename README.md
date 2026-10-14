@@ -35,6 +35,7 @@ Output in `dist/family/`:
 | `guide/windows.md`, `guide/linux.md`, `guide/mac.md` | Step-by-step guides to send with it |
 
 Non-secret lines in a profile can be edited by hand, then `./build.sh family`.
+Just the guides (no passwords needed): `./guides.sh family [out-dir]`.
 
 ## Profile fields (`profiles/<name>.conf`)
 

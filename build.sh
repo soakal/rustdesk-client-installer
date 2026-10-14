@@ -64,20 +64,5 @@ stamp "$win" install-windows.ps1 "$1"
 chmod +x "dist/$1/install-unix.sh"
 # cmd.exe wants CRLF; the launcher's last line is the #__PS__ marker the PowerShell part is cut at.
 sed "s|__TITLE__|$title|" "$tool/templates/launcher.cmd" | cat - "dist/$1/install-windows.ps1" | sed 's/$/\r/' > "dist/$1/Install-RustDesk-Windows.cmd"
-# Guides for this profile: the support contact and brand name filled in, the brand's own screenshots
-# (brand-src/<brand>/img/) laid over the plain ones (guides/img/).
-g="dist/$1/guide"; mkdir -p "$g/img"
-for os in windows linux mac; do
-  python3 - "$tool/guides/$os.md" "$helper" "$title" > "$g/$os.md" <<'PY'
-import re, sys
-text, helper, title = open(sys.argv[1]).read(), sys.argv[2], sys.argv[3]
-if helper != "your support person":
-    text = re.sub(r"[Yy]our(\s+)support(\s+)person", lambda m: helper if m.group(0)[0] == "y" else helper[0].upper() + helper[1:], text)
-if title != "RustDesk":
-    text = text.replace("remote help", title, 1)
-sys.stdout.write(text)
-PY
-done
-cp "$tool"/guides/img/*.png "$g/img/"
-[ -z "$brand" ] || [ ! -d "brand-src/$brand/img" ] || cp "brand-src/$brand"/img/*.png "$g/img/" 2>/dev/null || true
+"$tool/guides.sh" "$1"
 echo "built dist/$1/ (installers + guide/)"
