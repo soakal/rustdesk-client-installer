@@ -121,7 +121,7 @@ try {
   # Branded shortcut last (RustDesk's own installer writes its shortcuts asynchronously) and never fatal.
   if ($P.ICON_B64) {
     try {
-      $ico = "$env:ProgramFiles\RustDesk\$($P.BRAND)-support.ico"   # one file per brand: Windows caches icons by path
+      $ico = "$env:ProgramFiles\RustDesk\$($P.BRAND)-support-v2.ico"   # one file per brand; bump vN when the icon changes: Windows caches icons by path
       [IO.File]::WriteAllBytes($ico, [Convert]::FromBase64String($P.ICON_B64))
       $shell = New-Object -ComObject WScript.Shell
       foreach ($dir in "$env:PUBLIC\Desktop", "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\RustDesk") {
