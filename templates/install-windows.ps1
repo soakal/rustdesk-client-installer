@@ -4,6 +4,8 @@
 #Requires -RunAsAdministrator
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+# Windows PowerShell 5.1 on Server 2016 / older Win10 defaults to TLS 1.0, which GitHub refuses.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 $P = @'
 __PROFILE__
@@ -49,7 +51,7 @@ try {
     $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
     if (-not (Test-Path $ts)) {
       $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
-      Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-$arch.msi" -OutFile "$tmp\ts.msi"
+      Invoke-WebRequest -UseBasicParsing "https://pkgs.tailscale.com/stable/tailscale-setup-latest-$arch.msi" -OutFile "$tmp\ts.msi"
       # "latest" has no fixed hash, so check it is really signed by Tailscale before running it as admin.
       $sig = Get-AuthenticodeSignature "$tmp\ts.msi"
       if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '(^|, )O="?Tailscale Inc\.?"?(,|$)') { throw 'The Tailscale download did not pass its safety check. Try again later.' }
@@ -80,7 +82,7 @@ try {
   # --- RustDesk ---
   Say 'Downloading and installing RustDesk (about a minute). A RustDesk window may pop up - leave it alone.'
   $rdarch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' }
-  Invoke-WebRequest "https://github.com/rustdesk/rustdesk/releases/download/$ver/rustdesk-$ver-$rdarch.exe" -OutFile "$tmp\rd.exe"
+  Invoke-WebRequest -UseBasicParsing "https://github.com/rustdesk/rustdesk/releases/download/$ver/rustdesk-$ver-$rdarch.exe" -OutFile "$tmp\rd.exe"
   $want = if ($rdarch -eq 'aarch64') { $P.SHA_EXE_ARM64 } else { $P.SHA_EXE_X64 }
   if (-not $want -or (Get-FileHash "$tmp\rd.exe" -Algorithm SHA256).Hash -ne $want) { throw 'The RustDesk download did not pass its safety check. Try again later.' }
   # No -Wait: the installer leaves RustDesk running, so -Wait would never return.
