@@ -24,6 +24,7 @@ if [ -n "$BRAND_NAME" ]; then
   c=$(get ANSI_COLOR); bar="=================================================================="; tag=$(get TAGLINE)
   printf '\033[%sm%s\033[0m\n  \033[1m%s%s\033[0m\n\033[%sm%s\033[0m\n' "$c" "$bar" "$BRAND_NAME" "${tag:+  -  $tag}" "$c" "$bar"
 fi
+echo "Installer $(get INSTALLER_VERSION) - RustDesk $(get VERSION)"
 echo "This sets up RustDesk so __HELPER__ can help you with this computer. It takes a few minutes."
 say "First, the unlock passphrase"
 # RD_UNLOCK in the environment skips the prompt (unattended/RMM use, run as root: sudo drops it).

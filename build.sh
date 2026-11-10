@@ -50,7 +50,9 @@ for key, suffix in names.items():
     if dg.startswith("sha256:"): print(f"{key}={dg[7:]}")
 ' "$ver" > "$win.sha" || { echo "could not fetch RustDesk $ver checksums from GitHub" >&2; exit 1; }
 grep -q '^SHA_EXE_X64=' "$win.sha" || { echo "no published checksums for RustDesk $ver" >&2; exit 1; }
-{ cat "$conf"; cat "$win.sha"; } | tee "$unix" > "$win"; rm -f "$win.sha"
+# Installer version (the tool's VERSION file) is shown in the installers and used to tag releases.
+iver=$(tr -d '\r\n' < "$tool/VERSION"); [[ "$iver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "$tool/VERSION: x.y.z" >&2; exit 1; }
+{ cat "$conf"; cat "$win.sha"; echo "INSTALLER_VERSION=$iver"; } | tee "$unix" > "$win"; rm -f "$win.sha"
 brand=$(val BRAND "$conf")
 if [ -n "$brand" ]; then
   # BRAND=<name> pulls in brand-src/<name>/brand.conf and its icon.png (shortcut/app-menu icon).
@@ -81,4 +83,4 @@ chmod +x "dist/$1/install-unix.sh"
 # cmd.exe wants CRLF; the launcher's last line is the #__PS__ marker the PowerShell part is cut at.
 sed "s|__TITLE__|$title|" "$tool/templates/launcher.cmd" | cat - "dist/$1/install-windows.ps1" | sed 's/$/\r/' > "dist/$1/Install-RustDesk-Windows.cmd"
 "$tool/guides.sh" "$1"
-echo "built dist/$1/ (installers + guide/)"
+echo "built dist/$1/ (installer $iver, RustDesk $ver: installers + guide/)"

@@ -6,6 +6,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 # Windows PowerShell 5.1 on Server 2016 / older Win10 defaults to TLS 1.0, which GitHub refuses.
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+# A 32-bit RMM/deployment agent would see Program Files (x86); RustDesk is 64-bit.
+$pf = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
 
 $P = @'
 __PROFILE__
@@ -14,8 +16,13 @@ __PROFILE__
 # Decrypts `openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -a` output (see make.sh).
 function Unlock([string]$b64, [string]$pass) {
   $raw = [Convert]::FromBase64String($b64)
-  $kdf = [Security.Cryptography.Rfc2898DeriveBytes]::new($pass, [byte[]]$raw[8..15], 600000, [Security.Cryptography.HashAlgorithmName]::SHA256)
-  $kb = $kdf.GetBytes(48)
+  $salt = [byte[]]$raw[8..15]
+  try { $kb = [Security.Cryptography.Rfc2898DeriveBytes]::new($pass, $salt, 600000, [Security.Cryptography.HashAlgorithmName]::SHA256).GetBytes(48) }
+  catch {
+    # .NET before 4.7.2 (Server 2016, Win10 before 1803) has no SHA-256 PBKDF2: same algorithm by hand (HMACSHA256 is everywhere).
+    if (-not ('RdPbkdf2' -as [type])) { Add-Type -TypeDefinition 'public static class RdPbkdf2 { public static byte[] Derive(byte[] pw, byte[] salt, int iter, int len) { using (var h = new System.Security.Cryptography.HMACSHA256(pw)) { var o = new byte[len]; for (int b = 1; (b - 1) * 32 < len; b++) { var s = new byte[salt.Length + 4]; System.Buffer.BlockCopy(salt, 0, s, 0, salt.Length); s[salt.Length] = (byte)(b >> 24); s[salt.Length + 1] = (byte)(b >> 16); s[salt.Length + 2] = (byte)(b >> 8); s[salt.Length + 3] = (byte)b; var u = h.ComputeHash(s); var t = (byte[])u.Clone(); for (int i = 1; i < iter; i++) { u = h.ComputeHash(u); for (int j = 0; j < 32; j++) t[j] ^= u[j]; } System.Buffer.BlockCopy(t, 0, o, (b - 1) * 32, System.Math.Min(32, len - (b - 1) * 32)); } return o; } } }' }
+    $kb = [RdPbkdf2]::Derive([Text.Encoding]::UTF8.GetBytes($pass), $salt, 600000, 48)
+  }
   $aes = [Security.Cryptography.Aes]::Create()
   $aes.Key = [byte[]]$kb[0..31]; $aes.IV = [byte[]]$kb[32..47]
   $ct = [byte[]]$raw[16..($raw.Length - 1)]
@@ -24,6 +31,13 @@ function Unlock([string]$b64, [string]$pass) {
   catch { throw $bad }
   if (-not $txt.StartsWith('ok:', [StringComparison]::Ordinal)) { throw $bad }
   $txt.Substring(3)
+}
+# FIRSTBOOT/SYSTEM runs can start before the network is fully up, so retry a few times.
+function Get-File($url, $out) {
+  for ($i = 1; ; $i++) {
+    try { Invoke-WebRequest -UseBasicParsing $url -OutFile $out; return }
+    catch { if ($i -ge 3) { throw }; Start-Sleep 10 }
+  }
 }
 function Say($msg) { Write-Host ''; Write-Host "==> $msg" -ForegroundColor Cyan }
 
@@ -35,6 +49,7 @@ try {
     Write-Host ('  ' + $P.BRAND_NAME + $(if ($P.TAGLINE) { '  -  ' + $P.TAGLINE })) -ForegroundColor White
     Write-Host $bar -ForegroundColor $P.CONSOLE_COLOR
   }
+  Write-Host "Installer $($P.INSTALLER_VERSION) - RustDesk $($P.VERSION)"
   Write-Host 'This sets up RustDesk so __HELPER__ can help you with this computer. It takes a few minutes.'
   Say 'First, the unlock passphrase'
   # $env:RD_UNLOCK skips the prompt (unattended/RMM use).
@@ -48,18 +63,22 @@ try {
   # --- Tailscale ---
   if ($P.TAILSCALE -ne 'none') {
     Say 'Setting up the secure connection (Tailscale)'
-    $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+    $ts = "$pf\Tailscale\tailscale.exe"
     if (-not (Test-Path $ts)) {
       $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
-      Invoke-WebRequest -UseBasicParsing "https://pkgs.tailscale.com/stable/tailscale-setup-latest-$arch.msi" -OutFile "$tmp\ts.msi"
+      Get-File "https://pkgs.tailscale.com/stable/tailscale-setup-latest-$arch.msi" "$tmp\ts.msi"
       # "latest" has no fixed hash, so check it is really signed by Tailscale before running it as admin.
       $sig = Get-AuthenticodeSignature "$tmp\ts.msi"
       if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '(^|, )O="?Tailscale Inc\.?"?(,|$)') { throw 'The Tailscale download did not pass its safety check. Try again later.' }
       $m = Start-Process msiexec -ArgumentList "/i `"$tmp\ts.msi`" /qn TS_NOLAUNCH=true" -Wait -PassThru
       if ($m.ExitCode -notin 0, 3010) { throw "Tailscale did not install (error $($m.ExitCode))." }
     }
+    # With 'Stop', any stderr line from tailscale (e.g. tailscaled still starting) would be fatal.
+    $ErrorActionPreference = 'Continue'
     & $ts status *> $null
-    if ($LASTEXITCODE -ne 0) {
+    $st = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($st -ne 0) {
       # tailscale writes the login link and its errors to stderr. With 'Stop', Windows PowerShell turns the first
       # stderr line into a fatal error whenever output is captured (RMM, a log file), so print it as plain text.
       $ErrorActionPreference = 'Continue'
@@ -82,16 +101,20 @@ try {
   # --- RustDesk ---
   Say 'Downloading and installing RustDesk (about a minute). A RustDesk window may pop up - leave it alone.'
   $rdarch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' }
-  Invoke-WebRequest -UseBasicParsing "https://github.com/rustdesk/rustdesk/releases/download/$ver/rustdesk-$ver-$rdarch.exe" -OutFile "$tmp\rd.exe"
-  $want = if ($rdarch -eq 'aarch64') { $P.SHA_EXE_ARM64 } else { $P.SHA_EXE_X64 }
-  if (-not $want -or (Get-FileHash "$tmp\rd.exe" -Algorithm SHA256).Hash -ne $want) { throw 'The RustDesk download did not pass its safety check. Try again later.' }
-  # No -Wait: the installer leaves RustDesk running, so -Wait would never return.
-  Start-Process "$tmp\rd.exe" -ArgumentList '--silent-install'
-  $rd = "$env:ProgramFiles\RustDesk\rustdesk.exe"
+  $rd = "$pf\RustDesk\rustdesk.exe"
   # Wait for this version, not just any rustdesk.exe: an upgrade starts with the old one already there.
   $ok = { (Test-Path $rd) -and (Get-Item $rd).VersionInfo.ProductVersion -match "^$([regex]::Escape($ver))(\+|$)" }
-  for ($i = 0; $i -lt 60 -and -not (& $ok); $i++) { Start-Sleep 2 }
-  if (-not (& $ok)) { throw "RustDesk $ver install did not finish in 2 minutes" }
+  # Already on this version (a re-run to fix settings): skip the installer, which would restart the
+  # service under the settings step below.
+  if (-not (& $ok)) {
+    Get-File "https://github.com/rustdesk/rustdesk/releases/download/$ver/rustdesk-$ver-$rdarch.exe" "$tmp\rd.exe"
+    $want = if ($rdarch -eq 'aarch64') { $P.SHA_EXE_ARM64 } else { $P.SHA_EXE_X64 }
+    if (-not $want -or (Get-FileHash "$tmp\rd.exe" -Algorithm SHA256).Hash -ne $want) { throw 'The RustDesk download did not pass its safety check. Try again later.' }
+    # No -Wait: the installer leaves RustDesk running, so -Wait would never return.
+    Start-Process "$tmp\rd.exe" -ArgumentList '--silent-install'
+    for ($i = 0; $i -lt 60 -and -not (& $ok); $i++) { Start-Sleep 2 }
+    if (-not (& $ok)) { throw "RustDesk $ver install did not finish in 2 minutes" }
+  }
   if (-not (Get-Service RustDesk -ErrorAction SilentlyContinue)) { & $rd --install-service | Out-Null; Start-Sleep 5 }
   Say 'Applying settings'
   # RustDesk exits 0 even when a setting fails. Only "Done!" proves the password reached the running service,
@@ -123,7 +146,7 @@ try {
   # Branded shortcut last (RustDesk's own installer writes its shortcuts asynchronously) and never fatal.
   if ($P.ICON_B64) {
     try {
-      $ico = "$env:ProgramFiles\RustDesk\$($P.BRAND)-support-v2.ico"   # one file per brand; bump vN when the icon changes: Windows caches icons by path
+      $ico = "$pf\RustDesk\$($P.BRAND)-support-v2.ico"   # one file per brand; bump vN when the icon changes: Windows caches icons by path
       [IO.File]::WriteAllBytes($ico, [Convert]::FromBase64String($P.ICON_B64))
       $shell = New-Object -ComObject WScript.Shell
       foreach ($dir in "$env:PUBLIC\Desktop", "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\RustDesk") {
@@ -145,5 +168,6 @@ try {
   Write-Host "*** $($_.Exception.Message)" -ForegroundColor Red
   exit 1
 } finally {
-  Remove-Item $tmp -Recurse -Force
+  # The RustDesk installer may still be running from here; a leftover temp folder must not fail the install.
+  Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
