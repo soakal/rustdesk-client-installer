@@ -55,6 +55,16 @@ try {
   # $env:RD_UNLOCK skips the prompt (unattended/RMM use).
   $pass = if ($env:RD_UNLOCK) { $env:RD_UNLOCK } else { [Net.NetworkCredential]::new('', (Read-Host 'Type the passphrase __HELPER__ gave you (you will see * as you type), then press Enter' -AsSecureString)).Password }
   Remove-Item Env:RD_UNLOCK -ErrorAction SilentlyContinue   # keep it out of child processes (Tailscale, msiexec, RustDesk)
+  # Typing is done: turn off QuickEdit, or one click in this window (title "Select ...") silently pauses the
+  # install until a key is pressed. Restored in finally. No console (RMM/SYSTEM) = skipped, nothing compiled.
+  $qe = $null
+  if (-not [Console]::IsInputRedirected) {
+    try {
+      Add-Type -Namespace RdCon -Name K32 -MemberDefinition '[DllImport("kernel32.dll")] public static extern System.IntPtr GetStdHandle(int h); [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(System.IntPtr h, out uint m); [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(System.IntPtr h, uint m);'
+      $qh = [RdCon.K32]::GetStdHandle(-10); $qm = [uint32]0
+      if ([RdCon.K32]::GetConsoleMode($qh, [ref]$qm) -and [RdCon.K32]::SetConsoleMode($qh, [uint32](($qm -band 0xFFFFFFBF) -bor 0x80))) { $qe = $qm }   # -QUICK_EDIT +EXTENDED_FLAGS
+    } catch {}
+  }
   $pw = Unlock $P.PASSWORD_ENC $pass
   # Windows PowerShell mangles " and \ in native arguments, which would silently set a different password.
   if ($pw -match '["\\]') { throw 'The RustDesk password contains " or \, which Windows cannot pass to RustDesk. Ask __HELPER__ for a new installer.' }
@@ -168,6 +178,8 @@ try {
   Write-Host "*** $($_.Exception.Message)" -ForegroundColor Red
   exit 1
 } finally {
+  # QuickEdit back on so the ID above can be selected and copied.
+  if ($null -ne $qe) { try { [void][RdCon.K32]::SetConsoleMode($qh, [uint32]($qe -bor 0x80)) } catch {} }
   # The RustDesk installer may still be running from here; a leftover temp folder must not fail the install.
   Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
