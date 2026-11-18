@@ -40,6 +40,31 @@ function Get-File($url, $out) {
   }
 }
 function Say($msg) { Write-Host ''; Write-Host "==> $msg" -ForegroundColor Cyan }
+# Runs rustdesk.exe with a time limit and returns its stdout. Exit code -> $script:RdExit (-1 = no answer in time),
+# stderr -> $script:RdErr (kept out of the result: a warning there must not count as a setting's value).
+# Never "& $rd ... | Out-String": when RustDesk leaves a process behind (--install-service opened its window
+# under SYSTEM at FIRSTBOOT, 2026-11-17), that process keeps the output pipe open and the call never returns.
+# Output goes to its own files instead, read with sharing because a leftover process may still hold them.
+function Invoke-Rd([string[]]$RdArgs, [int]$Seconds = 30) {
+  $id = [guid]::NewGuid(); $o = "$tmp\rd-$id.out"; $e = "$tmp\rd-$id.err"
+  # Windows PowerShell joins -ArgumentList without quoting: quote each one (the password has no " or \, checked).
+  $line = ($RdArgs | ForEach-Object { '"' + $_ + '"' }) -join ' '
+  $p = Start-Process $rd -ArgumentList $line -RedirectStandardOutput $o -RedirectStandardError $e -PassThru
+  try { $null = $p.Handle } catch {}   # Windows PowerShell 5.1 loses ExitCode unless the handle is opened while it runs
+  if (-not $p.WaitForExit($Seconds * 1000)) {
+    try { $p.Kill() } catch {}
+    $script:RdExit = -1; $script:RdErr = "RustDesk $($RdArgs[0]) did not answer within $Seconds seconds"
+    return ''
+  }
+  $script:RdExit = $p.ExitCode
+  # A file we cannot read is an error, not an empty answer ("silent = success" below would be fooled).
+  $txt = foreach ($f in $o, $e) {
+    $s = [IO.File]::Open($f, 'Open', 'Read', 'ReadWrite, Delete')
+    try { (New-Object IO.StreamReader($s)).ReadToEnd() } finally { $s.Dispose() }
+  }
+  $script:RdErr = $txt[1]
+  $txt[0]
+}
 
 $tmp = New-Item -ItemType Directory (Join-Path $env:TEMP ([guid]::NewGuid()))
 try {
@@ -125,34 +150,43 @@ try {
     for ($i = 0; $i -lt 60 -and -not (& $ok); $i++) { Start-Sleep 2 }
     if (-not (& $ok)) { throw "RustDesk $ver install did not finish in 2 minutes" }
   }
-  if (-not (Get-Service RustDesk -ErrorAction SilentlyContinue)) { & $rd --install-service | Out-Null; Start-Sleep 5 }
+  # The installer registers the service itself, a moment after rustdesk.exe shows the new version (RustDesk
+  # 1.5.1 is slower here than 1.5.0 was), so wait for it before registering it ourselves.
+  for ($i = 0; $i -lt 30 -and -not (Get-Service RustDesk -ErrorAction SilentlyContinue); $i++) { Start-Sleep 2 }
+  if (-not (Get-Service RustDesk -ErrorAction SilentlyContinue)) {
+    # Plain Start-Process, no redirection: this one leaves a process running, which must not inherit our handles.
+    $p = Start-Process $rd -ArgumentList '--install-service' -WindowStyle Hidden -PassThru
+    if (-not $p.WaitForExit(60000)) { try { $p.Kill() } catch {} }
+    for ($i = 0; $i -lt 15 -and -not (Get-Service RustDesk -ErrorAction SilentlyContinue); $i++) { Start-Sleep 2 }
+    if (-not (Get-Service RustDesk -ErrorAction SilentlyContinue)) { throw 'RustDesk installed but its service could not be registered.' }
+  }
   Say 'Applying settings'
   # RustDesk exits 0 even when a setting fails. Only "Done!" proves the password reached the running service,
   # so retry while it starts, and do it first so the options below also go to the service, not a stray file.
   for ($i = 0; $i -lt 15; $i++) {
     # .Start() returns at once; Start-Service can wait forever on a service stuck starting. The loop bounds it.
     try { (Get-Service RustDesk).Start() } catch {}   # the installer may still be registering it; retried here
-    $out = & $rd --password $pw | Out-String
+    $out = Invoke-Rd @('--password', $pw)
     if ($out -match 'Done!') { break }
     Start-Sleep 2
   }
-  if ($out -notmatch 'Done!') { throw "RustDesk did not take its settings: $out" }
+  if ($out -notmatch 'Done!') { throw "RustDesk did not take its settings: $out $script:RdErr" }
   # Blank = clear, so switching to a profile with public servers or no key drops the old values. Silent = success.
-  # '""' because Windows PowerShell drops a plain '' argument.
+  # An empty value becomes "" on the command line (Invoke-Rd quotes every argument).
   foreach ($o in @{ 'custom-rendezvous-server' = $P.ID_SERVER; 'relay-server' = $P.RELAY_SERVER; 'key' = $P.KEY }.GetEnumerator()) {
-    $out = & $rd --option $o.Key $(if ($o.Value) { $o.Value } else { '""' }) | Out-String
-    if ($LASTEXITCODE -or $out.Trim()) { throw "RustDesk did not take setting $($o.Key): $out" }
+    $out = Invoke-Rd @('--option', $o.Key, "$($o.Value)")
+    if ($script:RdExit -or $out.Trim()) { throw "RustDesk did not take setting $($o.Key): $out $script:RdErr" }
     # Read it back too: RustDesk can drop a write without saying so.
-    $got = (& $rd --option $o.Key | Out-String).Trim()
-    if ($LASTEXITCODE -or $got -cne "$($o.Value)") { throw "RustDesk did not keep setting $($o.Key)" }
+    $got = (Invoke-Rd @('--option', $o.Key)).Trim()
+    if ($script:RdExit -or $got -cne "$($o.Value)") { throw "RustDesk did not keep setting $($o.Key)" }
   }
   # Ask the service once more: if it stopped answering mid-way, the options above went to a local file instead.
-  if ((& $rd --password $pw | Out-String) -notmatch 'Done!') { throw 'RustDesk stopped answering while taking its settings.' }
+  if ((Invoke-Rd @('--password', $pw)) -notmatch 'Done!') { throw 'RustDesk stopped answering while taking its settings.' }
   # The server can reject a reused ID (e.g. a reimaged PC) and RustDesk then picks a new one,
   # so give it time to register before reporting.
   Start-Sleep 20
-  $id = (& $rd --get-id | Out-String).Trim()
-  if (-not $id) { $id = '(open RustDesk and read the number under "Your ID")' }
+  $id = (Invoke-Rd @('--get-id')).Trim()
+  if ($script:RdExit -or $id -notmatch '^\d+$') { $id = '(open RustDesk and read the number under "Your ID")' }
   # Branded shortcut last (RustDesk's own installer writes its shortcuts asynchronously) and never fatal.
   if ($P.ICON_B64) {
     try {
